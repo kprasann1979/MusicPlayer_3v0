@@ -1,6 +1,6 @@
 # 🎵 Arduino Music Box v3.0 - Complete Edition with Volume Control
 
-The most advanced version of our Arduino music box, featuring a rotary encoder for smooth song selection, a 4-digit display, play/pause functionality, and **dedicated volume control buttons**. This version offers complete control over your music experience!
+The most advanced version of our Arduino music box, featuring a rotary encoder for smooth song selection, a 4-digit display, play/pause functionality, **dedicated volume control buttons**, **automatic track advancement with display updates**, and a **3-hour auto-stop timer**. This version offers complete control over your music experience!
 
 ## 📋 What This Project Does
 
@@ -10,6 +10,8 @@ This feature-rich music box allows you to:
 - **Play and pause music** with dedicated buttons
 - **Control volume** with separate up/down buttons (0-30)
 - **Visual feedback** with "PLAY", "PAUS", "UP", and "DN" display modes
+- **Automatic track advancement** - When a song finishes, automatically plays the next track and updates the display
+- **3-hour auto-stop timer** - Player automatically stops after 3 hours of continuous playback
 - **Wrap-around selection** - 99 goes to 1, and 1 goes to 99
 
 ## 🛠️ What You'll Need
@@ -98,13 +100,19 @@ Each button has one terminal connected to its respective pin (9, 8, or 10) and t
 2. **Press the rotary encoder** to play the selected song
    - The display will show "PLAY" and the song will start
    - After 5 seconds, it returns to showing the track number
+   - **Auto-advance**: When the song finishes, the next track plays automatically and the display updates
 3. **Press the pause button** to pause/resume
    - Display shows "PAUS" when paused
    - Display shows "PLAY" when resumed
+   - The 3-hour timer also pauses and resumes accordingly
 4. **Press the volume up button** to increase volume (0-30)
    - Display shows "UP" temporarily
 5. **Press the volume down button** to decrease volume
    - Display shows "DN" temporarily
+6. **Auto-stop after 3 hours**
+   - After 3 hours of continuous playback, the player automatically stops
+   - Display shows "oF" (OFF) to indicate auto-stop activation
+   - Press the play button to restart playback
 
 ## 💡 How It Works
 
@@ -120,6 +128,19 @@ Each button has one terminal connected to its respective pin (9, 8, or 10) and t
 - **Default**: 20 (moderate volume)
 - **Visual feedback**: "UP" and "DN" displayed when adjusting
 - **Auto-return**: Returns to track number after 5 seconds
+
+#### Automatic Track Advancement
+- **Track completion detection**: Uses DFPlayer's built-in notification when a track finishes
+- **Seamless transition**: Automatically plays the next track (1→2→3...→99→1)
+- **Display updates**: Shows the current playing track number in real-time
+- **Works with any song length**: Whether a song is 5 minutes or 1 hour, the system detects completion accurately
+- **No interference**: The checking runs in the background without affecting audio playback
+
+#### 3-Hour Auto-Stop Timer
+- **Automatic shutdown**: Player stops after 3 hours of continuous playback
+- **Pause-aware**: Timer pauses when music is paused and resumes when playback continues
+- **Visual indication**: Displays "oF" (OFF) when auto-stop activates
+- **Perfect for sleep**: Ideal for bedtime listening or timed playback scenarios
 
 #### Smart Display
 - Shows track numbers (1-99) normally
