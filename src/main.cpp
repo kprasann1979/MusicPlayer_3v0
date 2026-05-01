@@ -37,14 +37,6 @@ int currentVolume = 20;   // 🔊 NEW
 unsigned long statusDisplayTime = 0;
 bool showingStatus = false;
 
-// ===== AUTO STOP TIMER (3 hours) =====
-#define AUTO_STOP_DURATION 10800000UL  // 3 hours in milliseconds
-unsigned long autoStopStartTime = 0;
-bool autoStopTimerActive = false;
-
-// ===== AUTO TRACK ADVANCE =====
-int currentPlayingTrack = 1;
-
 // ===== INTERRUPT ENCODER =====
 void readEncoderISR() {
 
@@ -91,14 +83,14 @@ void displayPAUS() {
 
 // ===== DISPLAY UP =====
 void displayUP() {
-  uint8_t data[] = {0x00, 0x00, 0x3E, 0x3F}; // blank blank U P
-  display.setSegments(data);
+  uint8_t data[] = {0x3E, 0x3F}; // U P
+  display.setSegments(data, 2, 1);
 }
 
 // ===== DISPLAY DN =====
 void displayDN() {
-  uint8_t data[] = {0x00, 0x00, 0x5E, 0x54}; // blank blank D N
-  display.setSegments(data);
+  uint8_t data[] = {0x5E, 0x54}; // D N
+  display.setSegments(data, 2, 1);
 }
 
 // ===== PLAY BUTTON =====
@@ -119,13 +111,6 @@ void readPlayButton() {
     isPlaying = true;
     isPaused  = false;
 
-    // Start/restart the 3-hour auto-stop timer
-    autoStopStartTime = millis();
-    autoStopTimerActive = true;
-    
-    // Reset track tracking
-    currentPlayingTrack = songNumber;
-
     statusDisplayTime = millis();
     showingStatus = true;
 
@@ -142,14 +127,10 @@ void readPauseButton() {
       if (!TEST_MODE) dfPlayer.pause();
       displayPAUS();
       isPaused = true;
-      // Pause the auto-stop timer by resetting start time
-      autoStopStartTime = millis();
     } else {
       if (!TEST_MODE) dfPlayer.start();
       displayPLAY();
       isPaused = false;
-      // Resume the auto-stop timer
-      autoStopStartTime = millis();
     }
 
     statusDisplayTime = millis();
@@ -204,59 +185,6 @@ void autoReturnDisplay() {
   }
 }
 
-// ===== AUTO STOP TIMER =====
-void checkAutoStopTimer() {
-  if (autoStopTimerActive && isPlaying && !isPaused) {
-    if (millis() - autoStopStartTime >= AUTO_STOP_DURATION) {
-      // 3 hours elapsed, stop playback
-      if (!TEST_MODE) {
-        dfPlayer.stop();
-      }
-      isPlaying = false;
-      isPaused = false;
-      autoStopTimerActive = false;
-      
-      // Show "OFF" on display
-      uint8_t offData[] = {0x00, 0x00, 0x3F, 0x73}; // blank blank o F
-      display.setSegments(offData);
-      
-      Serial.println("===== AUTO STOP: 3 hours elapsed =====");
-    }
-  }
-}
-
-// ===== CHECK FOR TRACK COMPLETION =====
-void checkTrackCompletion() {
-  if (isPlaying && !isPaused) {
-    // Check if DFPlayer has sent any messages
-    if (dfPlayer.available()) {
-      uint8_t type = dfPlayer.readType();
-      
-      // Check if track finished playing
-      if (type == DFPlayerPlayFinished) {
-        // Advance to next track
-        currentPlayingTrack++;
-        
-        // Wrap around after track 99
-        if (currentPlayingTrack > 99) {
-          currentPlayingTrack = 1;
-        }
-        
-        // Update the display to show the new track number
-        display.showNumberDecEx(currentPlayingTrack, 0, false);
-        
-        // Start the next track on DFPlayer
-        if (!TEST_MODE) {
-          dfPlayer.play(currentPlayingTrack);
-        }
-        
-        Serial.print("Track finished, advanced to: ");
-        Serial.println(currentPlayingTrack);
-      }
-    }
-  }
-}
-
 // ===== SETUP =====
 void setup() {
   Serial.begin(9600);
@@ -296,6 +224,4 @@ void loop() {
   }
 
   autoReturnDisplay();
-  checkAutoStopTimer();     // Check if 3 hours have elapsed
-  checkTrackCompletion();   // Check if current track finished and advance
 }
