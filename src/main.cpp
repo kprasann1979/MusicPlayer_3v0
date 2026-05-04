@@ -31,8 +31,9 @@ volatile int stepSize = 1;
 
 bool isPlaying = false;
 bool isPaused  = false;
+bool loopMode = false;    // 🔁 Loop playback toggle
 
-int currentVolume = 20;   // 🔊 NEW
+int currentVolume = 10;   // 🔊 Mid-level volume (range: 0-30)
 
 unsigned long statusDisplayTime = 0;
 bool showingStatus = false;
@@ -83,23 +84,59 @@ void displayPAUS() {
 
 // ===== DISPLAY UP =====
 void displayUP() {
-  uint8_t data[] = {0x3E, 0x3F}; // U P
-  display.setSegments(data, 2, 1);
+  uint8_t data[] = {0x00, 0x00, 0x3E, 0x3F}; // _ _ U P (centered on right)
+  display.setSegments(data, 4, 0);
 }
 
 // ===== DISPLAY DN =====
 void displayDN() {
-  uint8_t data[] = {0x5E, 0x54}; // D N
-  display.setSegments(data, 2, 1);
+  uint8_t data[] = {0x00, 0x00, 0x5E, 0x54}; // _ _ D N (centered on right)
+  display.setSegments(data, 4, 0);
 }
 
-// ===== PLAY BUTTON =====
+// ===== DISPLAY LOOP =====
+void displayLOOP() {
+  uint8_t data[] = {0x38, 0x3F, 0x1C, 0x1C}; // L O O P
+  display.setSegments(data, 4, 0);
+}
+
+// ===== DISPLAY NOLP =====
+void displayNOLP() {
+  uint8_t data[] = {0x5E, 0x38, 0x3F, 0x5E}; // N O L P
+  display.setSegments(data, 4, 0);
+}
+
+// ===== PLAY BUTTON (with long press for loop toggle) =====
 void readPlayButton() {
 
   if (digitalRead(ENC_SW) == LOW) {
 
-    delay(200);
+    delay(200);  // Debounce
 
+    unsigned long pressStartTime = millis();
+    
+    // Wait for button release or timeout (3 seconds for long press)
+    while (digitalRead(ENC_SW) == LOW) {
+      if (millis() - pressStartTime >= 3000) {
+        // Long press detected - toggle loop mode
+        loopMode = !loopMode;
+        
+        if (loopMode) {
+          displayLOOP();
+        } else {
+          displayNOLP();
+        }
+        
+        statusDisplayTime = millis();
+        showingStatus = true;
+        
+        // Wait for button release
+        while (digitalRead(ENC_SW) == LOW);
+        return;
+      }
+    }
+    
+    // Short press - play current song
     if (!TEST_MODE) {
       dfPlayer.stop();
       delay(100);
@@ -113,8 +150,6 @@ void readPlayButton() {
 
     statusDisplayTime = millis();
     showingStatus = true;
-
-    while (digitalRead(ENC_SW) == LOW);
   }
 }
 
