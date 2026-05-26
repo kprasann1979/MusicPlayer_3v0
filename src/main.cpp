@@ -5,7 +5,6 @@
 // ===== CONFIG =====
 #define TEST_MODE false  // Set to true to test without MP3 module
 #define TOTAL_FOLDERS 10 // Number of category folders (01-10)
-#define SONGS_PER_FOLDER 99 // Max songs per folder (001-99)
 
 // ===== Pins =====
 #define ENC_CLK 3      // MUST be interrupt pin
@@ -26,19 +25,18 @@ DFRobotDFPlayerMini dfPlayer;
 TM1637Display display(DISP_CLK, DISP_DIO);
 
 // ===== Variables =====
-volatile int currentFolder = 1;     // Current category folder (01-10)
-volatile int currentSong = 1;       // Current song within folder (001-99)
+volatile int currentFolder = 1;     // Current folder (01-10)
 volatile bool encoderMoved = false;
 
 bool isPlaying = false;
 bool isPaused  = false;
-bool loopMode = true;    // 🔁 Default to loop mode for folder playback
-bool songSelectMode = false; // When true, encoder selects song within folder
+int currentSongInFolder = 0;  // Track current song in folder (0 = not set)
+const int MAX_SONGS_PER_FOLDER = 255;  // Max songs to try in a folder
 
-int currentVolume = 10;   // 🔊 Mid-level volume (range: 0-30)
+int currentVolume = 10;   // Volume (range: 0-30)
 
-unsigned long statusDisplayTime = 0;
-bool showingStatus = false;
+unsigned long displayTimer = 0;
+int displayState = 0;  // 0=folder, 1=status (PLAY/PAUS/UP/DN)
 
 // ===== INTERRUPT ENCODER =====
 void readEncoderISR() {
@@ -46,7 +44,7 @@ void readEncoderISR() {
   static unsigned long lastInterruptTime = 0;
   unsigned long now = millis();
 
-  // ✅ Debounce (ignore noise within 5ms)
+  // Debounce (ignore noise within 5ms)
   if (now - lastInterruptTime < 5) return;
   lastInterruptTime = now;
 
@@ -54,97 +52,92 @@ void readEncoderISR() {
   bool clkState = digitalRead(ENC_CLK);
   bool dtState  = digitalRead(ENC_DT);
 
-  // ✅ Stable direction detection
+  // Direction detection
   if (clkState == dtState) {
-    if (songSelectMode) {
-      currentSong++;
-      if (currentSong > SONGS_PER_FOLDER) currentSong = 1;
-    } else {
-      currentFolder++;
-      if (currentFolder > TOTAL_FOLDERS) currentFolder = 1;
-    }
+    currentFolder++;
+    if (currentFolder > TOTAL_FOLDERS) currentFolder = 1;
   } else {
-    if (songSelectMode) {
-      currentSong--;
-      if (currentSong < 1) currentSong = SONGS_PER_FOLDER;
-    } else {
-      currentFolder--;
-      if (currentFolder < 1) currentFolder = TOTAL_FOLDERS;
-    }
+    currentFolder--;
+    if (currentFolder < 1) currentFolder = TOTAL_FOLDERS;
   }
 
   encoderMoved = true;
 }
 
-// ===== SHOW FOLDER NUMBER =====
-void showFolderNumber() {
-  // Display folder number with leading zero (01, 02, ... 10)
-  display.showNumberDecEx(currentFolder, 0, true, 2);
-}
+// Segment codes for TM1637 (a=bit0, b=bit1, c=bit2, d=bit3, e=bit4, f=bit5, g=bit6, dp=bit7)
+const uint8_t DIGIT_SEG[] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x02, 0x7F, 0x6D}; // 0-9
+const uint8_t CHAR_F = 0x71;     // F (segments c, d, e, f)
+const uint8_t CHAR_DASH = 0x40;  // - (middle segment g)
 
-// ===== SHOW SONG NUMBER =====
-void showSongNumber() {
-  // Display song number with leading zeros (001, 002, ... 099)
-  display.showNumberDecEx(currentSong, 0, true, 3);
+// ===== SHOW FOLDER NUMBER (F-01 format) =====
+void showFolderNumber() {
+  // Display as "F-01", "F-02", ... "F-10"
+  uint8_t folder = (uint8_t)currentFolder;
+  if (folder < 10) {
+    uint8_t data[] = {CHAR_F, CHAR_DASH, DIGIT_SEG[0], DIGIT_SEG[folder]};  // F - 0 1-9
+    display.setSegments(data, 4, 0);
+  } else {
+    uint8_t data[] = {CHAR_F, CHAR_DASH, DIGIT_SEG[folder / 10], DIGIT_SEG[folder % 10]};  // F - tens ones
+    display.setSegments(data, 4, 0);
+  }
 }
 
 // ===== DISPLAY PLAY =====
 void displayPLAY() {
   uint8_t data[] = {0x73, 0x38, 0x77, 0x6E};
-  display.setSegments(data);
+  display.setSegments(data, 4, 0);
 }
 
 // ===== DISPLAY PAUS =====
 void displayPAUS() {
   uint8_t data[] = {0x73, 0x77, 0x3E, 0x6D};
-  display.setSegments(data);
+  display.setSegments(data, 4, 0);
 }
 
 // ===== DISPLAY UP =====
 void displayUP() {
-  uint8_t data[] = {0x00, 0x00, 0x3E, 0x3F}; // _ _ U P (centered on right)
+  uint8_t data[] = {0x00, 0x00, 0x3E, 0x3F};  // _ _ U P
   display.setSegments(data, 4, 0);
 }
 
 // ===== DISPLAY DN =====
 void displayDN() {
-  uint8_t data[] = {0x00, 0x00, 0x5E, 0x54}; // _ _ D N (centered on right)
+  uint8_t data[] = {0x00, 0x00, 0x5E, 0x54};  // _ _ D N
   display.setSegments(data, 4, 0);
 }
 
-// ===== DISPLAY LOOP =====
-void displayLOOP() {
-  uint8_t data[] = {0x38, 0x3F, 0x1C, 0x1C}; // L O O P
-  display.setSegments(data, 4, 0);
-}
-
-// ===== DISPLAY NOLP =====
-void displayNOLP() {
-  uint8_t data[] = {0x5E, 0x38, 0x3F, 0x5E}; // N O L P
-  display.setSegments(data, 4, 0);
-}
-
-// ===== DISPLAY SONG MODE =====
-void displaySONG() {
-  uint8_t data[] = {0x00, 0x00, 0x6D, 0x77}; // _ _ S G (S on pos 3, G on pos 4)
-  display.setSegments(data, 4, 0);
-}
-
-// ===== PLAY FOLDER (with loop) =====
-void playFolderLoop(int folder) {
+// ===== PLAY FOLDER (plays all songs in folder, loops automatically) =====
+void playFolder(int folder) {
   if (!TEST_MODE) {
     dfPlayer.stop();
     delay(100);
     dfPlayer.playFolder(folder, 1);
+    currentSongInFolder = 1;
   }
 }
 
-// ===== PLAY SPECIFIC SONG IN FOLDER =====
-void playSpecificSong(int folder, int song) {
+// ===== CHECK FOR SONG FINISHED AND ADVANCE =====
+void checkSongFinished() {
+  if (!isPlaying || isPaused) return;
+  
   if (!TEST_MODE) {
-    dfPlayer.stop();
-    delay(100);
-    dfPlayer.playFolder(folder, song);
+    // Check if DFPlayer has finished playing current song
+    if (dfPlayer.available()) {
+      int responseType = dfPlayer.readType();
+      // Type 0 = play finished, Type 257 = current play time query response
+      if (responseType == 0 || responseType == 257) {
+        // Song finished, advance to next song in folder
+        currentSongInFolder++;
+        if (currentSongInFolder > MAX_SONGS_PER_FOLDER) {
+          currentSongInFolder = 1;  // Loop back to first song
+        }
+        dfPlayer.playFolder(currentFolder, currentSongInFolder);
+        Serial.print("Playing folder ");
+        Serial.print(currentFolder);
+        Serial.print(", song ");
+        Serial.println(currentSongInFolder);
+      }
+    }
   }
 }
 
@@ -155,94 +148,44 @@ void readPlayButton() {
 
     delay(200);  // Debounce
 
-    unsigned long pressStartTime = millis();
-    
-    // Wait for button release or timeout (3 seconds for long press)
-    while (digitalRead(ENC_SW) == LOW) {
-      if (millis() - pressStartTime >= 3000) {
-        // Long press detected - toggle loop mode
-        loopMode = !loopMode;
-        
-        if (loopMode) {
-          displayLOOP();
-        } else {
-          displayNOLP();
-        }
-        
-        statusDisplayTime = millis();
-        showingStatus = true;
-        
-        // Wait for button release
-        while (digitalRead(ENC_SW) == LOW);
-        return;
-      }
-    }
-    
-    // Short press - play current selection
-    if (songSelectMode) {
-      // In song select mode: play specific song
-      playSpecificSong(currentFolder, currentSong);
-    } else {
-      // In folder select mode: play entire folder (loop)
-      playFolderLoop(currentFolder);
-    }
+    // Wait for button release
+    while (digitalRead(ENC_SW) == LOW);
+
+    // Play current folder (all songs will play in order)
+    playFolder(currentFolder);
 
     displayPLAY();
+    displayTimer = millis();
+    displayState = 1;
 
     isPlaying = true;
     isPaused  = false;
-
-    statusDisplayTime = millis();
-    showingStatus = true;
   }
 }
 
-// ===== PAUSE BUTTON (also toggles song select mode when not playing) =====
+// ===== PAUSE BUTTON =====
 void readPauseButton() {
-  if (digitalRead(PAUSE_BTN) == LOW) {
+  if (digitalRead(PAUSE_BTN) == LOW && isPlaying) {
     delay(200);
 
-    if (isPlaying) {
-      // If playing, toggle pause/resume
-      if (!isPaused) {
-        if (!TEST_MODE) dfPlayer.pause();
-        displayPAUS();
-        isPaused = true;
-      } else {
-        if (!TEST_MODE) dfPlayer.start();
-        displayPLAY();
-        isPaused = false;
-      }
+    if (!isPaused) {
+      if (!TEST_MODE) dfPlayer.pause();
+      displayPAUS();
+      isPaused = true;
     } else {
-      // If not playing, toggle song select mode
-      songSelectMode = !songSelectMode;
-      
-      if (songSelectMode) {
-        // Enter song selection mode
-        currentSong = 1; // Reset to first song
-        displaySONG();
-        delay(1500); // Show "SG" briefly
-        showSongNumber();
-        Serial.print("Song Select Mode - Folder: ");
-        Serial.print(currentFolder);
-        Serial.print(", Song: ");
-        Serial.println(currentSong);
-      } else {
-        // Exit song selection mode, return to folder display
-        showFolderNumber();
-        Serial.print("Folder Select Mode - Folder: ");
-        Serial.println(currentFolder);
-      }
+      if (!TEST_MODE) dfPlayer.start();
+      displayPLAY();
+      isPaused = false;
     }
 
-    statusDisplayTime = millis();
-    showingStatus = true;
+    displayTimer = millis();
+    displayState = 1;
 
     while (digitalRead(PAUSE_BTN) == LOW);
   }
 }
 
-// ===== 🔊 VOLUME UP =====
+// ===== VOLUME UP =====
 void readVolumeUpButton() {
   if (digitalRead(VOL_UP) == LOW) {
     delay(200);
@@ -251,16 +194,15 @@ void readVolumeUpButton() {
       currentVolume++;
       if (!TEST_MODE) dfPlayer.volume(currentVolume);
       displayUP();
+      displayTimer = millis();
+      displayState = 1;
     }
-
-    statusDisplayTime = millis();
-    showingStatus = true;
 
     while (digitalRead(VOL_UP) == LOW);
   }
 }
 
-// ===== 🔊 VOLUME DOWN =====
+// ===== VOLUME DOWN =====
 void readVolumeDownButton() {
   if (digitalRead(VOL_DOWN) == LOW) {
     delay(200);
@@ -269,27 +211,21 @@ void readVolumeDownButton() {
       currentVolume--;
       if (!TEST_MODE) dfPlayer.volume(currentVolume);
       displayDN();
+      displayTimer = millis();
+      displayState = 1;
     }
-
-    statusDisplayTime = millis();
-    showingStatus = true;
 
     while (digitalRead(VOL_DOWN) == LOW);
   }
 }
 
-// ===== AUTO RETURN =====
+// ===== AUTO RETURN TO FOLDER DISPLAY =====
 void autoReturnDisplay() {
-
-  if (isPaused) return;
-
-  if (isPlaying && showingStatus && millis() - statusDisplayTime > 5000) {
-    if (songSelectMode) {
-      showSongNumber();
-    } else {
+  if (displayState == 1 && millis() - displayTimer > 3000) {
+    displayState = 0;
+    if (isPlaying) {
       showFolderNumber();
     }
-    showingStatus = false;
   }
 }
 
@@ -319,8 +255,6 @@ void setup() {
   Serial.println("===== MUSIC PLAYER STARTED =====");
   Serial.print("Total folders: ");
   Serial.println(TOTAL_FOLDERS);
-  Serial.print("Songs per folder: ");
-  Serial.println(SONGS_PER_FOLDER);
 }
 
 // ===== LOOP =====
@@ -329,13 +263,14 @@ void loop() {
   readPauseButton();
   readVolumeUpButton();
   readVolumeDownButton();
+  checkSongFinished();  // Check for song completion and advance to next
 
-  if (encoderMoved && !isPaused) {
+  if (encoderMoved) {
     encoderMoved = false;
-    if (songSelectMode) {
-      showSongNumber();
-    } else {
+    if (!isPlaying || displayState == 0) {
       showFolderNumber();
+      displayTimer = millis();
+      displayState = 0;
     }
   }
 
